@@ -4,7 +4,9 @@ Semantic diff for CSV and Parquet tables. Single binary, type-aware, CI-friendly
 
 Unlike text-based `diff`, tabdiff matches rows by key and compares **values**, not bytes:
 `1.0` equals `1.00`, floats can have tolerances, column order doesn't matter, and you
-can diff a CSV against a Parquet file directly.
+can diff a CSV against a Parquet file directly. Tables without a unique key (logs,
+event streams, transaction exports) are compared as row multisets instead — duplicates
+included, automatically.
 
 > **Status**: early development. The streaming core (external sort + k-way merge) is in
 > place: memory use is bounded by `--memory-mb` regardless of input size. Informal
@@ -30,11 +32,31 @@ Rows: 5 → 5
 - id=5
 ```
 
+When no column uniquely identifies rows (or with `--keyless`), rows are matched by
+whole-row content hash and compared as multisets — edits then appear as `- old / + new`:
+
+```console
+$ tabdiff old_events.csv new_events.csv
+Schema
+  identical
+Key: none — keyless mode [auto: no unique key column found] (rows matched by content; edits appear as - old / + new)
+Rows: 4 → 4
+  + 2 added
+  - 2 removed
+  ~ 0 modified
+
++ ts=10:10, sensor=C, temp=18
++ ts=10:05, sensor=A, temp=21.7
+- ts=10:00, sensor=A, temp=21.5
+- ts=10:05, sensor=A, temp=21.6
+```
+
 Common flags:
 
 | Flag | Meaning |
 |---|---|
 | `--key id` / `--key a,b` | match rows on these column(s); inferred when omitted |
+| `--keyless` | force whole-row content matching (multiset diff) |
 | `--tol-abs X` / `--tol-rel X` | float comparison tolerance |
 | `--format json` | machine-readable report |
 | `--fail-fast N` | stop after N row differences (fast CI gate) |
@@ -52,8 +74,8 @@ Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences f
 
 ## Roadmap
 
-See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: keyless whole-row
-hash mode, column rename detection, git diff driver for Parquet, Python bindings.
+See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: column rename
+detection, git diff driver for Parquet, `--where` row filtering, Python bindings.
 Performance track: byte-comparable key encoding (arrow-row), already-sorted input
 detection, `--spill-dir` for choosing the spill location.
 

@@ -30,6 +30,13 @@ pub struct ModifiedRow {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RowSample {
+    pub row: Vec<KeyVal>,
+    /// How many row instances this sample stands for (>1 only in keyless mode).
+    pub count: usize,
+}
+
+#[derive(Debug, Serialize)]
 pub struct RowCounts {
     pub left: usize,
     pub right: usize,
@@ -44,8 +51,8 @@ pub struct DiffCounts {
 
 #[derive(Debug, Serialize)]
 pub struct Samples {
-    pub added: Vec<Vec<KeyVal>>,
-    pub removed: Vec<Vec<KeyVal>>,
+    pub added: Vec<RowSample>,
+    pub removed: Vec<RowSample>,
     pub modified: Vec<ModifiedRow>,
 }
 
@@ -53,6 +60,8 @@ pub struct Samples {
 pub struct DiffReport {
     pub schema: SchemaDiff,
     pub key: KeyInfo,
+    /// True when rows were matched by whole-row content hash instead of a key.
+    pub keyless: bool,
     pub rows: RowCounts,
     pub diff: DiffCounts,
     pub columns_changed: BTreeMap<String, usize>,
@@ -93,11 +102,22 @@ impl DiffReport {
             o.push_str(&format!("  {y}~ {}: {} → {}{z}\n", c.name, c.left, c.right));
         }
 
-        o.push_str(&format!(
-            "{b}Key{z}: {}{}\n",
-            self.key.columns.join(", "),
-            if self.key.inferred { " (inferred)" } else { "" }
-        ));
+        if self.keyless {
+            o.push_str(&format!(
+                "{b}Key{z}: none — keyless mode{} (rows matched by content; edits appear as - old / + new)\n",
+                if self.key.inferred {
+                    " [auto: no unique key column found]"
+                } else {
+                    ""
+                }
+            ));
+        } else {
+            o.push_str(&format!(
+                "{b}Key{z}: {}{}\n",
+                self.key.columns.join(", "),
+                if self.key.inferred { " (inferred)" } else { "" }
+            ));
+        }
 
         o.push_str(&format!("{b}Rows{z}: {} → {}\n", self.rows.left, self.rows.right));
         let total = self.diff.added + self.diff.removed + self.diff.modified;
@@ -131,14 +151,15 @@ impl DiffReport {
                     .join(", ");
                 o.push_str(&format!("{y}~ {}{z}  {}\n", fmt_key(&m.key), ch));
             }
-            for k in &self.samples.added {
-                o.push_str(&format!("{g}+ {}{z}\n", fmt_key(k)));
+            for s in &self.samples.added {
+                o.push_str(&format!("{g}+ {}{}{z}\n", fmt_key(&s.row), fmt_count(s.count)));
             }
-            for k in &self.samples.removed {
-                o.push_str(&format!("{r}- {}{z}\n", fmt_key(k)));
+            for s in &self.samples.removed {
+                o.push_str(&format!("{r}- {}{}{z}\n", fmt_key(&s.row), fmt_count(s.count)));
             }
-            let shown =
-                self.samples.modified.len() + self.samples.added.len() + self.samples.removed.len();
+            let shown = self.samples.modified.len()
+                + self.samples.added.iter().map(|s| s.count).sum::<usize>()
+                + self.samples.removed.iter().map(|s| s.count).sum::<usize>();
             if total > shown {
                 o.push_str(&format!(
                     "… {} more row difference(s) not shown (use --samples N)\n",
@@ -153,6 +174,14 @@ impl DiffReport {
             o.push_str("\nNo differences found.\n");
         }
         o
+    }
+}
+
+fn fmt_count(count: usize) -> String {
+    if count > 1 {
+        format!(" ×{count}")
+    } else {
+        String::new()
     }
 }
 

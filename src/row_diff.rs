@@ -4,9 +4,10 @@ use std::collections::BTreeMap;
 use anyhow::{Context, Result, bail};
 
 use crate::DiffConfig;
+use crate::hash::{HASH_COL, with_row_hash};
 use crate::input::{BatchIter, Table};
 use crate::report::{
-    Change, DiffCounts, DiffReport, KeyInfo, KeyVal, ModifiedRow, RowCounts, Samples,
+    Change, DiffCounts, DiffReport, KeyInfo, KeyVal, ModifiedRow, RowCounts, RowSample, Samples,
 };
 use crate::schema_diff::SchemaDiff;
 use crate::sort::{Row, SortedSource, SpillDir, sort_into_runs};
@@ -117,12 +118,130 @@ pub fn diff_streams(
     Ok(DiffReport {
         schema,
         key: KeyInfo { columns: key_cols, inferred },
+        keyless: false,
         rows: RowCounts { left: lrows, right: rrows },
         diff: counts,
         columns_changed,
         samples,
         truncated,
     })
+}
+
+/// Keyless diff: rows are matched by whole-row content hash and compared as
+/// multisets, so duplicate rows are legal and edits appear as remove + add.
+/// `auto` marks that this mode was a fallback after key inference failed.
+pub fn diff_streams_keyless(
+    left: BatchIter,
+    right: BatchIter,
+    auto: bool,
+    schema: SchemaDiff,
+    cfg: &DiffConfig,
+) -> Result<DiffReport> {
+    let mutual = schema.mutual.clone();
+    let left = with_row_hash(left, &mutual)?;
+    let right = with_row_hash(right, &mutual)?;
+    let lschema = left.schema.clone();
+    let rschema = right.schema.clone();
+    let key_cols = vec![HASH_COL.to_string()];
+
+    let budget = cfg.memory_mb.saturating_mul(1024 * 1024);
+    let mut spill = SpillDir::new();
+    let (lruns, lrows) = sort_into_runs(left, &key_cols, budget, &mut spill)?;
+    let (rruns, rrows) = sort_into_runs(right, &key_cols, budget, &mut spill)?;
+    let mut ls = SortedSource::new(lruns, &key_cols, cfg.left.display().to_string())?;
+    let mut rs = SortedSource::new(rruns, &key_cols, cfg.right.display().to_string())?;
+
+    let lcols = sample_columns(&mutual, &lschema)?;
+    let rcols = sample_columns(&mutual, &rschema)?;
+
+    let mut counts = DiffCounts { added: 0, removed: 0, modified: 0 };
+    let mut samples = Samples { added: vec![], removed: vec![], modified: vec![] };
+    let mut truncated = false;
+
+    loop {
+        if cfg
+            .fail_fast
+            .is_some_and(|n| counts.added + counts.removed >= n)
+        {
+            truncated = true;
+            break;
+        }
+        enum Act {
+            Removed(Vec<KeyVal>),
+            Added(Vec<KeyVal>),
+            Matched(Vec<KeyVal>, Vec<KeyVal>),
+        }
+        let act = match (ls.peek(), rs.peek()) {
+            (None, None) => break,
+            (Some(lrow), None) => Act::Removed(render_row(lrow, &lcols)?),
+            (None, Some(rrow)) => Act::Added(render_row(rrow, &rcols)?),
+            (Some(lrow), Some(rrow)) => match cmp_keys(&lrow.key, &rrow.key) {
+                Ordering::Less => Act::Removed(render_row(lrow, &lcols)?),
+                Ordering::Greater => Act::Added(render_row(rrow, &rcols)?),
+                Ordering::Equal => {
+                    Act::Matched(render_row(lrow, &lcols)?, render_row(rrow, &rcols)?)
+                }
+            },
+        };
+        match act {
+            Act::Removed(row) => {
+                let n = ls.advance_group()?;
+                counts.removed += n;
+                push_sample(&mut samples.removed, row, n, cfg.max_samples);
+            }
+            Act::Added(row) => {
+                let n = rs.advance_group()?;
+                counts.added += n;
+                push_sample(&mut samples.added, row, n, cfg.max_samples);
+            }
+            Act::Matched(lrow, rrow) => {
+                let nl = ls.advance_group()?;
+                let nr = rs.advance_group()?;
+                if nl > nr {
+                    counts.removed += nl - nr;
+                    push_sample(&mut samples.removed, lrow, nl - nr, cfg.max_samples);
+                } else if nr > nl {
+                    counts.added += nr - nl;
+                    push_sample(&mut samples.added, rrow, nr - nl, cfg.max_samples);
+                }
+            }
+        }
+    }
+
+    Ok(DiffReport {
+        schema,
+        key: KeyInfo { columns: vec![], inferred: auto },
+        keyless: true,
+        rows: RowCounts { left: lrows, right: rrows },
+        diff: counts,
+        columns_changed: BTreeMap::new(),
+        samples,
+        truncated,
+    })
+}
+
+fn sample_columns(mutual: &[String], schema: &arrow::datatypes::SchemaRef) -> Result<Vec<(String, usize)>> {
+    mutual
+        .iter()
+        .map(|c| Ok((c.clone(), schema.index_of(c)?)))
+        .collect()
+}
+
+fn render_row(row: &Row, cols: &[(String, usize)]) -> Result<Vec<KeyVal>> {
+    cols.iter()
+        .map(|(name, i)| {
+            Ok(KeyVal {
+                column: name.clone(),
+                value: extract(row.batch.column(*i).as_ref(), row.row)?.render(),
+            })
+        })
+        .collect()
+}
+
+fn push_sample(dst: &mut Vec<RowSample>, row: Vec<KeyVal>, count: usize, max: usize) {
+    if dst.len() < max {
+        dst.push(RowSample { row, count });
+    }
 }
 
 fn record_removed(
@@ -134,7 +253,10 @@ fn record_removed(
 ) {
     counts.removed += 1;
     if samples.removed.len() < cfg.max_samples {
-        samples.removed.push(render_key(key_cols, &row.key));
+        samples.removed.push(RowSample {
+            row: render_key(key_cols, &row.key),
+            count: 1,
+        });
     }
 }
 
@@ -147,7 +269,10 @@ fn record_added(
 ) {
     counts.added += 1;
     if samples.added.len() < cfg.max_samples {
-        samples.added.push(render_key(key_cols, &row.key));
+        samples.added.push(RowSample {
+            row: render_key(key_cols, &row.key),
+            count: 1,
+        });
     }
 }
 

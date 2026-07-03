@@ -29,6 +29,7 @@ pub struct Row {
 }
 
 /// Lazily created spill directory, removed on drop.
+#[derive(Default)]
 pub struct SpillDir {
     path: Option<PathBuf>,
     counter: usize,
@@ -323,24 +324,42 @@ impl SortedSource {
         self.current.as_ref()
     }
 
+    /// Advances past every row sharing the current key and returns the group
+    /// size. Used by keyless mode, where duplicate keys are expected data
+    /// rather than an error.
+    pub fn advance_group(&mut self) -> Result<usize> {
+        let Some(key) = self.current.as_ref().map(|r| r.key.clone()) else {
+            return Ok(0);
+        };
+        let mut n = 0;
+        while let Some(cur) = &self.current {
+            if cmp_keys(&cur.key, &key) != Ordering::Equal {
+                break;
+            }
+            n += 1;
+            self.current = self.merge.next()?;
+        }
+        Ok(n)
+    }
+
     pub fn advance(&mut self) -> Result<()> {
         let next = self.merge.next()?;
-        if let (Some(cur), Some(nxt)) = (&self.current, &next) {
-            if cmp_keys(&cur.key, &nxt.key) == Ordering::Equal {
-                let rendered = self
-                    .key_cols
-                    .iter()
-                    .zip(&cur.key)
-                    .map(|(c, v)| format!("{c}={}", v.render()))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                bail!(
-                    "key ({}) is not unique in {}: e.g. {}",
-                    self.key_cols.join(", "),
-                    self.label,
-                    rendered
-                );
-            }
+        if let (Some(cur), Some(nxt)) = (&self.current, &next)
+            && cmp_keys(&cur.key, &nxt.key) == Ordering::Equal
+        {
+            let rendered = self
+                .key_cols
+                .iter()
+                .zip(&cur.key)
+                .map(|(c, v)| format!("{c}={}", v.render()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "key ({}) is not unique in {}: e.g. {}; pick a different --key or use --keyless",
+                self.key_cols.join(", "),
+                self.label,
+                rendered
+            );
         }
         self.current = next;
         Ok(())

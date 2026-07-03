@@ -1,3 +1,4 @@
+pub mod hash;
 pub mod input;
 pub mod report;
 pub mod row_diff;
@@ -28,6 +29,8 @@ pub struct DiffConfig {
     pub max_samples: usize,
     /// Sort-buffer budget before spilling to disk.
     pub memory_mb: usize,
+    /// Match rows by whole-row content hash instead of a key.
+    pub keyless: bool,
 }
 
 pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
@@ -40,22 +43,49 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
         bail!("tables share no columns; nothing to compare");
     }
 
-    let (key_cols, inferred) = match &cfg.key {
-        Some(k) => {
-            row_diff::validate_key(k, &schema)?;
-            (k.clone(), false)
+    // Keyed with a resolved key, or keyless (auto = fell back from inference).
+    enum Mode {
+        Keyed(Vec<String>, bool),
+        Keyless { auto: bool },
+    }
+    let has_tol = cfg.tol_abs.is_some() || cfg.tol_rel.is_some();
+    let mode = if cfg.keyless {
+        if cfg.key.is_some() {
+            bail!("--keyless and --key are mutually exclusive");
         }
-        None => {
-            let lsample =
-                input::read_sample(&cfg.left, &lschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
-            let rsample =
-                input::read_sample(&cfg.right, &rschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
-            (row_diff::infer_key(&lsample, &rsample, &schema.mutual)?, true)
+        if has_tol {
+            bail!("float tolerances are not supported in keyless mode (rows are matched by exact content hash)");
+        }
+        Mode::Keyless { auto: false }
+    } else if let Some(k) = &cfg.key {
+        row_diff::validate_key(k, &schema)?;
+        Mode::Keyed(k.clone(), false)
+    } else {
+        let lsample =
+            input::read_sample(&cfg.left, &lschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
+        let rsample =
+            input::read_sample(&cfg.right, &rschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
+        match row_diff::infer_key(&lsample, &rsample, &schema.mutual) {
+            Ok(k) => Mode::Keyed(k, true),
+            // Without tolerances, keyless is a safe drop-in; with them the
+            // user must decide, so surface the inference failure instead.
+            Err(_) if !has_tol => Mode::Keyless { auto: true },
+            Err(e) => {
+                return Err(e.context(
+                    "key inference failed and keyless mode cannot honor float tolerances; \
+                     pass --key or drop --tol-abs/--tol-rel",
+                ));
+            }
         }
     };
 
-    let cmp = Comparator::new(cfg.tol_abs, cfg.tol_rel);
     let left = input::open_batches(&cfg.left, &lschema, &schema.mutual)?;
     let right = input::open_batches(&cfg.right, &rschema, &schema.mutual)?;
-    row_diff::diff_streams(left, right, key_cols, inferred, schema, cfg, &cmp)
+    match mode {
+        Mode::Keyed(key_cols, inferred) => {
+            let cmp = Comparator::new(cfg.tol_abs, cfg.tol_rel);
+            row_diff::diff_streams(left, right, key_cols, inferred, schema, cfg, &cmp)
+        }
+        Mode::Keyless { auto } => row_diff::diff_streams_keyless(left, right, auto, schema, cfg),
+    }
 }

@@ -16,6 +16,9 @@ struct Cli {
     /// Key column(s) to match rows on, comma-separated; inferred when omitted
     #[arg(short, long, value_delimiter = ',')]
     key: Option<Vec<String>>,
+    /// Match rows by whole-row content instead of a key (edits appear as -/+)
+    #[arg(long, conflicts_with_all = ["key", "tol_abs", "tol_rel"])]
+    keyless: bool,
     /// Absolute tolerance when comparing floats
     #[arg(long)]
     tol_abs: Option<f64>,
@@ -53,6 +56,7 @@ fn main() -> ExitCode {
         fail_fast: cli.fail_fast,
         max_samples: cli.samples,
         memory_mb: cli.memory_mb,
+        keyless: cli.keyless,
     };
     match tabdiff::run_diff(&cfg) {
         Ok(report) => {

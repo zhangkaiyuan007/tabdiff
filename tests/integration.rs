@@ -18,6 +18,7 @@ fn cfg(left: &str, right: &str) -> DiffConfig {
         fail_fast: None,
         max_samples: 10,
         memory_mb: 256,
+        keyless: false,
     }
 }
 
@@ -121,6 +122,7 @@ fn spilling_produces_same_results_as_in_memory() {
             fail_fast: None,
             max_samples: 3,
             memory_mb,
+            keyless: false,
         };
         let report = run_diff(&c).unwrap();
         assert_eq!(report.diff.added, 5, "memory_mb={memory_mb}");
@@ -133,6 +135,46 @@ fn spilling_produces_same_results_as_in_memory() {
     }
     std::fs::remove_file(&lp).ok();
     std::fs::remove_file(&rp).ok();
+}
+
+// events_*.csv have no unique column: `10:00,A,21.5` appears twice on the
+// left. Right side: one duplicate dropped, 21.6 edited to 21.7, one row added.
+#[test]
+fn keyless_multiset_diff() {
+    let mut c = cfg("events_left.csv", "events_right.csv");
+    c.keyless = true;
+    let report = run_diff(&c).unwrap();
+    assert!(report.keyless);
+    assert!(!report.key.inferred);
+    assert_eq!(report.diff.added, 2); // edited row's new version + the new row
+    assert_eq!(report.diff.removed, 2); // dropped duplicate + edited row's old version
+    assert_eq!(report.diff.modified, 0);
+}
+
+#[test]
+fn keyless_fallback_when_no_unique_key() {
+    let report = run_diff(&cfg("events_left.csv", "events_right.csv")).unwrap();
+    assert!(report.keyless, "should fall back to keyless automatically");
+    assert!(report.key.inferred, "fallback should be marked as automatic");
+    assert_eq!(report.diff.added, 2);
+    assert_eq!(report.diff.removed, 2);
+}
+
+#[test]
+fn keyless_identical_files_with_duplicates() {
+    let mut c = cfg("events_left.csv", "events_left.csv");
+    c.keyless = true;
+    let report = run_diff(&c).unwrap();
+    assert!(!report.has_differences());
+}
+
+#[test]
+fn keyless_rejects_tolerances() {
+    let mut c = cfg("events_left.csv", "events_right.csv");
+    c.keyless = true;
+    c.tol_abs = Some(0.1);
+    let err = run_diff(&c).unwrap_err().to_string();
+    assert!(err.contains("not supported"), "unexpected error: {err}");
 }
 
 #[test]
