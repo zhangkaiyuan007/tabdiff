@@ -1,0 +1,6 @@
+id,name,amount,status,legacy
+1,alice,10.0,open,x
+2,bob,20.5,open,y
+3,carol,30.0,closed,z
+4,dave,2.5,open,w
+5,eve,50.0,pending,v

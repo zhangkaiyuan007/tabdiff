@@ -1,0 +1,6 @@
+id,name,amount,status,email
+1,alice,10.0,open,alice@example.com
+2,bob,20.50001,open,bob@example.com
+3,carol,30.0,open,carol@example.com
+4,dave,2.5,open,dave@example.com
+6,frank,60.0,open,frank@example.com
