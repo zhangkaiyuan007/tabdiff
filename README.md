@@ -6,8 +6,10 @@ Unlike text-based `diff`, tabdiff matches rows by key and compares **values**, n
 `1.0` equals `1.00`, floats can have tolerances, column order doesn't matter, and you
 can diff a CSV against a Parquet file directly.
 
-> **Status**: early development. The v0 core materializes tables in memory; a streaming
-> external-sort/merge core for larger-than-RAM files is the next milestone.
+> **Status**: early development. The streaming core (external sort + k-way merge) is in
+> place: memory use is bounded by `--memory-mb` regardless of input size. Informal
+> benchmark: two 2M-row / 54 MB CSVs diff in ~1.4 s with 68 MB peak RSS at an 8 MB
+> sort budget.
 
 ## Usage
 
@@ -37,6 +39,7 @@ Common flags:
 | `--format json` | machine-readable report |
 | `--fail-fast N` | stop after N row differences (fast CI gate) |
 | `--samples N` | show up to N example rows per category (default 10) |
+| `--memory-mb N` | sort-buffer budget before spilling to temp files (default 256) |
 
 Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences found, `2` error.
 
@@ -49,9 +52,10 @@ Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences f
 
 ## Roadmap
 
-See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: streaming core for
-larger-than-RAM files, keyless whole-row hash mode, column rename detection, git diff
-driver for Parquet, Python bindings.
+See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: keyless whole-row
+hash mode, column rename detection, git diff driver for Parquet, Python bindings.
+Performance track: byte-comparable key encoding (arrow-row), already-sorted input
+detection, `--spill-dir` for choosing the spill location.
 
 ## Development
 

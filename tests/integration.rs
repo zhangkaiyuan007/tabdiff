@@ -17,6 +17,7 @@ fn cfg(left: &str, right: &str) -> DiffConfig {
         tol_rel: None,
         fail_fast: None,
         max_samples: 10,
+        memory_mb: 256,
     }
 }
 
@@ -83,6 +84,55 @@ fn fail_fast_truncates_scan() {
     c.fail_fast = Some(1);
     let report = run_diff(&c).unwrap();
     assert!(report.truncated);
+}
+
+/// Generates ~60k-row tables and diffs them with a zero memory budget so
+/// every batch spills to disk, exercising the external-sort merge path.
+#[test]
+fn spilling_produces_same_results_as_in_memory() {
+    let dir = std::env::temp_dir();
+    let lp = dir.join(format!("tabdiff-big-l-{}.csv", std::process::id()));
+    let rp = dir.join(format!("tabdiff-big-r-{}.csv", std::process::id()));
+
+    let mut l = String::from("id,val,tag\n");
+    let mut r = String::from("id,val,tag\n");
+    for id in 0..60_000u64 {
+        l.push_str(&format!("{id},{},a\n", id * 2));
+        if (100..110).contains(&id) {
+            continue; // 10 rows removed on the right
+        }
+        let val = if id % 1000 == 0 { id * 2 + 1 } else { id * 2 }; // 60 modified
+        r.push_str(&format!("{id},{val},a\n"));
+    }
+    for id in 60_000..60_005u64 {
+        r.push_str(&format!("{id},{},a\n", id * 2)); // 5 rows added
+    }
+    std::fs::write(&lp, l).unwrap();
+    std::fs::write(&rp, r).unwrap();
+
+    let mut expected = None;
+    for memory_mb in [0, 256] {
+        let c = DiffConfig {
+            left: lp.clone(),
+            right: rp.clone(),
+            key: Some(vec!["id".into()]),
+            tol_abs: None,
+            tol_rel: None,
+            fail_fast: None,
+            max_samples: 3,
+            memory_mb,
+        };
+        let report = run_diff(&c).unwrap();
+        assert_eq!(report.diff.added, 5, "memory_mb={memory_mb}");
+        assert_eq!(report.diff.removed, 10, "memory_mb={memory_mb}");
+        assert_eq!(report.diff.modified, 60, "memory_mb={memory_mb}");
+        assert_eq!(report.rows.left, 60_000);
+        assert_eq!(report.rows.right, 59_995);
+        let counts = (report.diff.added, report.diff.removed, report.diff.modified);
+        assert_eq!(*expected.get_or_insert(counts), counts);
+    }
+    std::fs::remove_file(&lp).ok();
+    std::fs::remove_file(&rp).ok();
 }
 
 #[test]

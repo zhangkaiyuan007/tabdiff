@@ -28,6 +28,9 @@ struct Cli {
     /// Max example rows shown per category
     #[arg(long, default_value_t = 10)]
     samples: usize,
+    /// Sort-buffer memory budget in MB before spilling to disk
+    #[arg(long, default_value_t = 256)]
+    memory_mb: usize,
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
     format: OutputFormat,
@@ -49,6 +52,7 @@ fn main() -> ExitCode {
         tol_rel: cli.tol_rel,
         fail_fast: cli.fail_fast,
         max_samples: cli.samples,
+        memory_mb: cli.memory_mb,
     };
     match tabdiff::run_diff(&cfg) {
         Ok(report) => {
