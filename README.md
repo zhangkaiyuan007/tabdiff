@@ -2,6 +2,8 @@
 
 Semantic diff for CSV and Parquet tables. Single binary, type-aware, CI-friendly.
 
+![tabdiff demo](demo/demo.gif)
+
 Unlike text-based `diff`, tabdiff matches rows by key and compares **values**, not bytes:
 `1.0` equals `1.00`, floats can have tolerances, column order doesn't matter, and you
 can diff a CSV against a Parquet file directly. Renamed columns are detected by content
