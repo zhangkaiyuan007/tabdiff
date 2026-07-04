@@ -1,3 +1,4 @@
+pub mod filter;
 pub mod hash;
 pub mod input;
 pub mod rename;
@@ -41,6 +42,9 @@ pub struct DiffConfig {
     /// Force the input format for both sides instead of using file
     /// extensions (needed for extension-less temp files, e.g. from git).
     pub input_format: Option<FileFormat>,
+    /// Row filter applied to both sides before diffing, e.g.
+    /// `region = 'EU' AND amount >= 100`.
+    pub where_expr: Option<String>,
 }
 
 pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
@@ -121,8 +125,21 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
         rproj.push(r.right.clone());
     }
 
-    let left = input::open_batches(&cfg.left, &lschema, &lproj, cfg.input_format)?;
-    let right = input::open_batches(&cfg.right, &rschema, &rproj, cfg.input_format)?;
+    let mut left = input::open_batches(&cfg.left, &lschema, &lproj, cfg.input_format)?;
+    let mut right = input::open_batches(&cfg.right, &rschema, &rproj, cfg.input_format)?;
+    if let Some(expr) = &cfg.where_expr {
+        let pred = std::sync::Arc::new(filter::Predicate::parse(expr)?);
+        for col in pred.columns() {
+            if !schema.mutual.iter().any(|m| m == col) {
+                bail!(
+                    "--where column `{col}` must exist in both tables (shared columns: {})",
+                    schema.mutual.join(", ")
+                );
+            }
+        }
+        left = pred.apply(left)?;
+        right = pred.apply(right)?;
+    }
     match mode {
         Mode::Keyed(key_cols, inferred) => {
             let cmp = Comparator::new(cfg.tol_abs, cfg.tol_rel);

@@ -22,6 +22,7 @@ fn cfg(left: &str, right: &str) -> DiffConfig {
         assume_sorted: false,
         spill_dir: None,
         input_format: None,
+        where_expr: None,
     }
 }
 
@@ -129,6 +130,7 @@ fn spilling_produces_same_results_as_in_memory() {
             assume_sorted: false,
             spill_dir: None,
             input_format: None,
+            where_expr: None,
         };
         let report = run_diff(&c).unwrap();
         assert_eq!(report.diff.added, 5, "memory_mb={memory_mb}");
@@ -379,4 +381,36 @@ fn git_driver_mode() {
         .unwrap();
     assert!(out.status.success());
     assert!(String::from_utf8(out.stdout).unwrap().contains("new file"));
+}
+
+#[test]
+fn where_filters_both_sides() {
+    let mut c = cfg("left.csv", "right.csv");
+    c.where_expr = Some("status = 'open'".into());
+    let report = run_diff(&c).unwrap();
+    // Left open rows: 1,2,4. Right (all open): 1,2,3,4,6.
+    assert_eq!(report.rows.left, 3);
+    assert_eq!(report.rows.right, 5);
+    assert_eq!(report.diff.added, 2); // ids 3 and 6
+    assert_eq!(report.diff.removed, 0);
+    assert_eq!(report.diff.modified, 1); // id 2 amount edit
+}
+
+#[test]
+fn where_numeric_range() {
+    let mut c = cfg("left.csv", "right.csv");
+    c.where_expr = Some("amount >= 20 AND amount < 60".into());
+    let report = run_diff(&c).unwrap();
+    // Left in range: 2 (20.5), 3 (30), 5 (50). Right: 2 (20.50001), 3 (30).
+    assert_eq!(report.diff.removed, 1); // id 5
+    assert_eq!(report.diff.modified, 2); // id 2 amount, id 3 status
+    assert_eq!(report.diff.added, 0);
+}
+
+#[test]
+fn where_rejects_unknown_column() {
+    let mut c = cfg("left.csv", "right.csv");
+    c.where_expr = Some("nonexistent = 1".into());
+    let err = run_diff(&c).unwrap_err().to_string();
+    assert!(err.contains("nonexistent"), "unexpected error: {err}");
 }

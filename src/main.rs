@@ -43,6 +43,9 @@ struct Cli {
     /// Directory for spill files (default: system temp dir)
     #[arg(long, value_name = "DIR")]
     spill_dir: Option<PathBuf>,
+    /// Row filter applied to both sides, e.g. "region = 'EU' AND amount >= 100"
+    #[arg(long, value_name = "EXPR")]
+    r#where: Option<String>,
     /// Force input format for both sides (default: by file extension)
     #[arg(long, value_enum, value_name = "FORMAT")]
     input_format: Option<InputFormat>,
@@ -119,6 +122,7 @@ fn config(cli: &Cli) -> DiffConfig {
         assume_sorted: cli.assume_sorted,
         spill_dir: cli.spill_dir.clone(),
         input_format: cli.input_format.map(Into::into),
+        where_expr: cli.r#where.clone(),
     }
 }
 

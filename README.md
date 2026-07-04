@@ -66,6 +66,8 @@ Common flags:
 | `--memory-mb N` | sort-buffer budget before spilling to temp files (default 256) |
 | `--assume-sorted` | inputs already sorted by `--key`: skip sorting entirely, verify order on the fly |
 | `--spill-dir DIR` | where spill files go (default: system temp dir) |
+| `--where "region = 'EU' AND amount >= 100"` | filter rows on both sides before diffing (`= != < <= > >=`, `AND`) |
+| `--input-format csv\|parquet` | force the format instead of trusting file extensions |
 
 Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences found, `2` error.
 
@@ -96,8 +98,8 @@ All regular flags combine with `--git`, e.g. `tabdiff --key id --tol-rel 1e-9 --
 
 ## Roadmap
 
-See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: git diff driver
-for Parquet, `--where` row filtering, Python bindings.
+See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: Python bindings,
+S3/stdin inputs, sampling mode for very large tables.
 Performance track: keyless-mode throughput (hash-sort currently shuffles whole rows).
 
 Cross-type keys unify automatically: an `Int64` id on one side matches a `Float64` id
