@@ -31,6 +31,11 @@ pub struct DiffConfig {
     pub memory_mb: usize,
     /// Match rows by whole-row content hash instead of a key.
     pub keyless: bool,
+    /// Inputs are already sorted by the key: stream directly, skipping the
+    /// sort phase entirely; order is verified on the fly.
+    pub assume_sorted: bool,
+    /// Where spill files go (defaults to the system temp dir).
+    pub spill_dir: Option<PathBuf>,
 }
 
 pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
@@ -56,6 +61,9 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
         if has_tol {
             bail!("float tolerances are not supported in keyless mode (rows are matched by exact content hash)");
         }
+        if cfg.assume_sorted {
+            bail!("--assume-sorted requires a key (keyless mode orders rows by content hash, not file order)");
+        }
         Mode::Keyless { auto: false }
     } else if let Some(k) = &cfg.key {
         row_diff::validate_key(k, &schema)?;
@@ -65,6 +73,9 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
             input::read_sample(&cfg.left, &lschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
         let rsample =
             input::read_sample(&cfg.right, &rschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
+        if cfg.assume_sorted {
+            bail!("--assume-sorted requires an explicit --key");
+        }
         match row_diff::infer_key(&lsample, &rsample, &schema.mutual) {
             Ok(k) => Mode::Keyed(k, true),
             // Without tolerances, keyless is a safe drop-in; with them the

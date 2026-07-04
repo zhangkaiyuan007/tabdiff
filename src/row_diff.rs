@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 
@@ -10,7 +11,7 @@ use crate::report::{
     Change, DiffCounts, DiffReport, KeyInfo, KeyVal, ModifiedRow, RowCounts, RowSample, Samples,
 };
 use crate::schema_diff::SchemaDiff;
-use crate::sort::{Row, SortedSource, SpillDir, sort_into_runs};
+use crate::sort::{KeyCodec, KeySpec, Row, SortedSource, SpillDir, sort_into_runs};
 use crate::value::{Cell, Comparator, cmp_keys, extract};
 
 pub fn diff_streams(
@@ -24,13 +25,12 @@ pub fn diff_streams(
 ) -> Result<DiffReport> {
     let lschema = left.schema.clone();
     let rschema = right.schema.clone();
+    let spec = KeySpec::new(&key_cols, &lschema, &rschema)?;
+    let lcodec = Arc::new(spec.codec(&lschema)?);
+    let rcodec = Arc::new(spec.codec(&rschema)?);
 
-    let budget = cfg.memory_mb.saturating_mul(1024 * 1024);
-    let mut spill = SpillDir::new();
-    let (lruns, lrows) = sort_into_runs(left, &key_cols, budget, &mut spill)?;
-    let (rruns, rrows) = sort_into_runs(right, &key_cols, budget, &mut spill)?;
-    let mut ls = SortedSource::new(lruns, &key_cols, cfg.left.display().to_string())?;
-    let mut rs = SortedSource::new(rruns, &key_cols, cfg.right.display().to_string())?;
+    let mut spill = SpillDir::new(cfg.spill_dir.clone());
+    let (mut ls, mut rs) = build_sources(left, right, &lcodec, &rcodec, cfg, &mut spill)?;
 
     // (column name, index in left projected schema, index in right)
     let value_cols: Vec<(String, usize, usize)> = schema
@@ -39,6 +39,8 @@ pub fn diff_streams(
         .filter(|c| !key_cols.contains(c))
         .map(|c| Ok((c.clone(), lschema.index_of(c)?, rschema.index_of(c)?)))
         .collect::<Result<_>>()?;
+    let lkey = key_render_columns(&key_cols, &lcodec);
+    let rkey = key_render_columns(&key_cols, &rcodec);
 
     let mut counts = DiffCounts { added: 0, removed: 0, modified: 0 };
     let mut samples = Samples { added: vec![], removed: vec![], modified: vec![] };
@@ -62,20 +64,20 @@ pub fn diff_streams(
         let act = match (ls.peek(), rs.peek()) {
             (None, None) => break,
             (Some(lrow), None) => {
-                record_removed(lrow, &key_cols, cfg, &mut counts, &mut samples);
+                record(lrow, &lkey, &mut counts.removed, &mut samples.removed, cfg)?;
                 Act::Left
             }
             (None, Some(rrow)) => {
-                record_added(rrow, &key_cols, cfg, &mut counts, &mut samples);
+                record(rrow, &rkey, &mut counts.added, &mut samples.added, cfg)?;
                 Act::Right
             }
-            (Some(lrow), Some(rrow)) => match cmp_keys(&lrow.key, &rrow.key) {
+            (Some(lrow), Some(rrow)) => match lrow.key.cmp(&rrow.key) {
                 Ordering::Less => {
-                    record_removed(lrow, &key_cols, cfg, &mut counts, &mut samples);
+                    record(lrow, &lkey, &mut counts.removed, &mut samples.removed, cfg)?;
                     Act::Left
                 }
                 Ordering::Greater => {
-                    record_added(rrow, &key_cols, cfg, &mut counts, &mut samples);
+                    record(rrow, &rkey, &mut counts.added, &mut samples.added, cfg)?;
                     Act::Right
                 }
                 Ordering::Equal => {
@@ -96,7 +98,7 @@ pub fn diff_streams(
                         counts.modified += 1;
                         if samples.modified.len() < cfg.max_samples {
                             samples.modified.push(ModifiedRow {
-                                key: render_key(&key_cols, &lrow.key),
+                                key: render_row(lrow, &lkey)?,
                                 changes,
                             });
                         }
@@ -119,7 +121,10 @@ pub fn diff_streams(
         schema,
         key: KeyInfo { columns: key_cols, inferred },
         keyless: false,
-        rows: RowCounts { left: lrows, right: rrows },
+        rows: RowCounts {
+            left: ls.total_rows(),
+            right: rs.total_rows(),
+        },
         diff: counts,
         columns_changed,
         samples,
@@ -143,13 +148,12 @@ pub fn diff_streams_keyless(
     let lschema = left.schema.clone();
     let rschema = right.schema.clone();
     let key_cols = vec![HASH_COL.to_string()];
+    let spec = KeySpec::new(&key_cols, &lschema, &rschema)?;
+    let lcodec = Arc::new(spec.codec(&lschema)?);
+    let rcodec = Arc::new(spec.codec(&rschema)?);
 
-    let budget = cfg.memory_mb.saturating_mul(1024 * 1024);
-    let mut spill = SpillDir::new();
-    let (lruns, lrows) = sort_into_runs(left, &key_cols, budget, &mut spill)?;
-    let (rruns, rrows) = sort_into_runs(right, &key_cols, budget, &mut spill)?;
-    let mut ls = SortedSource::new(lruns, &key_cols, cfg.left.display().to_string())?;
-    let mut rs = SortedSource::new(rruns, &key_cols, cfg.right.display().to_string())?;
+    let mut spill = SpillDir::new(cfg.spill_dir.clone());
+    let (mut ls, mut rs) = build_sources(left, right, &lcodec, &rcodec, cfg, &mut spill)?;
 
     let lcols = sample_columns(&mutual, &lschema)?;
     let rcols = sample_columns(&mutual, &rschema)?;
@@ -175,7 +179,7 @@ pub fn diff_streams_keyless(
             (None, None) => break,
             (Some(lrow), None) => Act::Removed(render_row(lrow, &lcols)?),
             (None, Some(rrow)) => Act::Added(render_row(rrow, &rcols)?),
-            (Some(lrow), Some(rrow)) => match cmp_keys(&lrow.key, &rrow.key) {
+            (Some(lrow), Some(rrow)) => match lrow.key.cmp(&rrow.key) {
                 Ordering::Less => Act::Removed(render_row(lrow, &lcols)?),
                 Ordering::Greater => Act::Added(render_row(rrow, &rcols)?),
                 Ordering::Equal => {
@@ -212,7 +216,10 @@ pub fn diff_streams_keyless(
         schema,
         key: KeyInfo { columns: vec![], inferred: auto },
         keyless: true,
-        rows: RowCounts { left: lrows, right: rrows },
+        rows: RowCounts {
+            left: ls.total_rows(),
+            right: rs.total_rows(),
+        },
         diff: counts,
         columns_changed: BTreeMap::new(),
         samples,
@@ -220,60 +227,54 @@ pub fn diff_streams_keyless(
     })
 }
 
-fn sample_columns(mutual: &[String], schema: &arrow::datatypes::SchemaRef) -> Result<Vec<(String, usize)>> {
-    mutual
+fn build_sources(
+    left: BatchIter,
+    right: BatchIter,
+    lcodec: &Arc<KeyCodec>,
+    rcodec: &Arc<KeyCodec>,
+    cfg: &DiffConfig,
+    spill: &mut SpillDir,
+) -> Result<(SortedSource, SortedSource)> {
+    let llabel = cfg.left.display().to_string();
+    let rlabel = cfg.right.display().to_string();
+    if cfg.assume_sorted {
+        return Ok((
+            SortedSource::from_stream(left, lcodec.clone(), llabel)?,
+            SortedSource::from_stream(right, rcodec.clone(), rlabel)?,
+        ));
+    }
+    let budget = cfg.memory_mb.saturating_mul(1024 * 1024);
+    let (lruns, lrows) = sort_into_runs(left, lcodec, budget, spill)?;
+    let (rruns, rrows) = sort_into_runs(right, rcodec, budget, spill)?;
+    Ok((
+        SortedSource::from_runs(lruns, lcodec.clone(), llabel, lrows)?,
+        SortedSource::from_runs(rruns, rcodec.clone(), rlabel, rrows)?,
+    ))
+}
+
+fn key_render_columns(key_cols: &[String], codec: &KeyCodec) -> Vec<(String, usize)> {
+    key_cols
         .iter()
-        .map(|c| Ok((c.clone(), schema.index_of(c)?)))
+        .cloned()
+        .zip(codec.key_idx().iter().copied())
         .collect()
 }
 
-fn render_row(row: &Row, cols: &[(String, usize)]) -> Result<Vec<KeyVal>> {
-    cols.iter()
-        .map(|(name, i)| {
-            Ok(KeyVal {
-                column: name.clone(),
-                value: extract(row.batch.column(*i).as_ref(), row.row)?.render(),
-            })
-        })
-        .collect()
-}
-
-fn push_sample(dst: &mut Vec<RowSample>, row: Vec<KeyVal>, count: usize, max: usize) {
-    if dst.len() < max {
-        dst.push(RowSample { row, count });
-    }
-}
-
-fn record_removed(
+fn record(
     row: &Row,
-    key_cols: &[String],
+    cols: &[(String, usize)],
+    count: &mut usize,
+    samples: &mut Vec<RowSample>,
     cfg: &DiffConfig,
-    counts: &mut DiffCounts,
-    samples: &mut Samples,
-) {
-    counts.removed += 1;
-    if samples.removed.len() < cfg.max_samples {
-        samples.removed.push(RowSample {
-            row: render_key(key_cols, &row.key),
+) -> Result<()> {
+    *count += 1;
+    if samples.len() < cfg.max_samples {
+        samples.push(RowSample {
+            row: render_row(row, cols)?,
             count: 1,
         });
     }
-}
-
-fn record_added(
-    row: &Row,
-    key_cols: &[String],
-    cfg: &DiffConfig,
-    counts: &mut DiffCounts,
-    samples: &mut Samples,
-) {
-    counts.added += 1;
-    if samples.added.len() < cfg.max_samples {
-        samples.added.push(RowSample {
-            row: render_key(key_cols, &row.key),
-            count: 1,
-        });
-    }
+    Ok(())
 }
 
 pub fn validate_key(key: &[String], schema: &SchemaDiff) -> Result<()> {
@@ -355,12 +356,29 @@ fn extract_keys(t: &Table, cols: &[String]) -> Result<Vec<Vec<Cell>>> {
     Ok(keys)
 }
 
-fn render_key(cols: &[String], cells: &[Cell]) -> Vec<KeyVal> {
+fn sample_columns(
+    mutual: &[String],
+    schema: &arrow::datatypes::SchemaRef,
+) -> Result<Vec<(String, usize)>> {
+    mutual
+        .iter()
+        .map(|c| Ok((c.clone(), schema.index_of(c)?)))
+        .collect()
+}
+
+fn render_row(row: &Row, cols: &[(String, usize)]) -> Result<Vec<KeyVal>> {
     cols.iter()
-        .zip(cells)
-        .map(|(c, v)| KeyVal {
-            column: c.clone(),
-            value: v.render(),
+        .map(|(name, i)| {
+            Ok(KeyVal {
+                column: name.clone(),
+                value: extract(row.batch.column(*i).as_ref(), row.row)?.render(),
+            })
         })
         .collect()
+}
+
+fn push_sample(dst: &mut Vec<RowSample>, row: Vec<KeyVal>, count: usize, max: usize) {
+    if dst.len() < max {
+        dst.push(RowSample { row, count });
+    }
 }

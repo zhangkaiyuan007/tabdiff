@@ -34,6 +34,12 @@ struct Cli {
     /// Sort-buffer memory budget in MB before spilling to disk
     #[arg(long, default_value_t = 256)]
     memory_mb: usize,
+    /// Inputs are already sorted by --key: skip sorting, verify order on the fly
+    #[arg(long, requires = "key", conflicts_with = "keyless")]
+    assume_sorted: bool,
+    /// Directory for spill files (default: system temp dir)
+    #[arg(long, value_name = "DIR")]
+    spill_dir: Option<PathBuf>,
     /// Output format
     #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
     format: OutputFormat,
@@ -57,6 +63,8 @@ fn main() -> ExitCode {
         max_samples: cli.samples,
         memory_mb: cli.memory_mb,
         keyless: cli.keyless,
+        assume_sorted: cli.assume_sorted,
+        spill_dir: cli.spill_dir,
     };
     match tabdiff::run_diff(&cfg) {
         Ok(report) => {

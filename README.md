@@ -8,10 +8,10 @@ can diff a CSV against a Parquet file directly. Tables without a unique key (log
 event streams, transaction exports) are compared as row multisets instead — duplicates
 included, automatically.
 
-> **Status**: early development. The streaming core (external sort + k-way merge) is in
-> place: memory use is bounded by `--memory-mb` regardless of input size. Informal
-> benchmark: two 2M-row / 54 MB CSVs diff in ~1.4 s with 68 MB peak RSS at an 8 MB
-> sort budget.
+> **Status**: early development. The streaming core (external sort + k-way merge,
+> arrow-row byte-comparable keys) bounds memory by `--memory-mb` regardless of input
+> size. Informal benchmark, two 2M-row / 54 MB CSVs at an 8 MB sort budget: keyed diff
+> ~1.0 s / 29 MB peak RSS, `--assume-sorted` ~0.7 s, keyless ~4.4 s.
 
 ## Usage
 
@@ -62,6 +62,8 @@ Common flags:
 | `--fail-fast N` | stop after N row differences (fast CI gate) |
 | `--samples N` | show up to N example rows per category (default 10) |
 | `--memory-mb N` | sort-buffer budget before spilling to temp files (default 256) |
+| `--assume-sorted` | inputs already sorted by `--key`: skip sorting entirely, verify order on the fly |
+| `--spill-dir DIR` | where spill files go (default: system temp dir) |
 
 Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences found, `2` error.
 
@@ -76,8 +78,10 @@ Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences f
 
 See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: column rename
 detection, git diff driver for Parquet, `--where` row filtering, Python bindings.
-Performance track: byte-comparable key encoding (arrow-row), already-sorted input
-detection, `--spill-dir` for choosing the spill location.
+Performance track: keyless-mode throughput (hash-sort currently shuffles whole rows).
+
+Cross-type keys unify automatically: an `Int64` id on one side matches a `Float64` id
+on the other, and e.g. UUID-as-binary meets UUID-as-text at Utf8.
 
 ## Development
 

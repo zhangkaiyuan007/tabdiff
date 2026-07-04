@@ -19,6 +19,8 @@ fn cfg(left: &str, right: &str) -> DiffConfig {
         max_samples: 10,
         memory_mb: 256,
         keyless: false,
+        assume_sorted: false,
+        spill_dir: None,
     }
 }
 
@@ -123,6 +125,8 @@ fn spilling_produces_same_results_as_in_memory() {
             max_samples: 3,
             memory_mb,
             keyless: false,
+            assume_sorted: false,
+            spill_dir: None,
         };
         let report = run_diff(&c).unwrap();
         assert_eq!(report.diff.added, 5, "memory_mb={memory_mb}");
@@ -175,6 +179,74 @@ fn keyless_rejects_tolerances() {
     c.tol_abs = Some(0.1);
     let err = run_diff(&c).unwrap_err().to_string();
     assert!(err.contains("not supported"), "unexpected error: {err}");
+}
+
+#[test]
+fn assume_sorted_matches_normal_path() {
+    // left.csv / right.csv are written sorted by id.
+    let mut c = cfg("left.csv", "right.csv");
+    c.key = Some(vec!["id".into()]);
+    c.assume_sorted = true;
+    let report = run_diff(&c).unwrap();
+    assert_eq!(report.diff.added, 1);
+    assert_eq!(report.diff.removed, 1);
+    assert_eq!(report.diff.modified, 2);
+    assert_eq!(report.rows.left, 5);
+    assert_eq!(report.rows.right, 5);
+}
+
+#[test]
+fn assume_sorted_rejects_unsorted_input() {
+    let path = std::env::temp_dir().join(format!("tabdiff-unsorted-{}.csv", std::process::id()));
+    std::fs::write(&path, "id,v\n2,a\n1,b\n").unwrap();
+    let mut c = cfg("left.csv", "right.csv");
+    c.left = path.clone();
+    c.right = path.clone();
+    c.key = Some(vec!["id".into()]);
+    c.assume_sorted = true;
+    let err = run_diff(&c).unwrap_err().to_string();
+    std::fs::remove_file(&path).ok();
+    assert!(err.contains("not sorted"), "unexpected error: {err}");
+}
+
+/// An Int64 key on one side and a Float64 key on the other must still match
+/// (unified encoding), mirroring data-diff-era cross-type key complaints.
+#[test]
+fn cross_type_keys_unify() {
+    let table = tabdiff::input::read_table(&data("right.csv")).unwrap();
+    let id_idx = table.schema.index_of("id").unwrap();
+    let mut columns = table.batch.columns().to_vec();
+    columns[id_idx] =
+        arrow::compute::cast(&columns[id_idx], &arrow::datatypes::DataType::Float64).unwrap();
+    let mut fields: Vec<arrow::datatypes::Field> = table
+        .schema
+        .fields()
+        .iter()
+        .map(|f| f.as_ref().clone())
+        .collect();
+    fields[id_idx] = fields[id_idx]
+        .clone()
+        .with_data_type(arrow::datatypes::DataType::Float64);
+    let schema = std::sync::Arc::new(arrow::datatypes::Schema::new(fields));
+    let batch = arrow::array::RecordBatch::try_new(schema.clone(), columns).unwrap();
+
+    let path = std::env::temp_dir().join(format!("tabdiff-f64key-{}.parquet", std::process::id()));
+    let file = std::fs::File::create(&path).unwrap();
+    let mut w = parquet::arrow::ArrowWriter::try_new(file, schema, None).unwrap();
+    w.write(&batch).unwrap();
+    w.close().unwrap();
+
+    let mut c = cfg("left.csv", "right.csv");
+    c.right = path.clone();
+    c.key = Some(vec!["id".into()]);
+    let report = run_diff(&c);
+    std::fs::remove_file(&path).ok();
+    let report = report.unwrap();
+    // Same result as the plain csv-vs-csv diff: keys still line up.
+    assert_eq!(report.diff.added, 1);
+    assert_eq!(report.diff.removed, 1);
+    assert_eq!(report.diff.modified, 2);
+    assert_eq!(report.schema.type_changed.len(), 1); // id: Int64 -> Float64
 }
 
 #[test]
