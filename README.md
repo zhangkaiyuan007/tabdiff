@@ -98,12 +98,25 @@ All regular flags combine with `--git`, e.g. `tabdiff --key id --tol-rel 1e-9 --
 
 ## Roadmap
 
-See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: Python bindings,
-S3/stdin inputs, sampling mode for very large tables.
+See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: PyPI/binary
+releases, S3/stdin inputs, sampling mode for very large tables.
 Performance track: keyless-mode throughput (hash-sort currently shuffles whole rows).
 
 Cross-type keys unify automatically: an `Int64` id on one side matches a `Float64` id
 on the other, and e.g. UUID-as-binary meets UUID-as-text at Utf8.
+
+## Python
+
+The `python/` crate exposes the same engine as a Python module (built with maturin,
+PyPI release pending). The report comes back as a dict — the shape pytest wants:
+
+```python
+import tabdiff
+
+report = tabdiff.diff("expected.parquet", "actual.parquet",
+                      key=["id"], tol_rel=1e-9, where="region = 'EU'")
+assert not report["has_differences"], report["samples"]
+```
 
 ## Development
 
