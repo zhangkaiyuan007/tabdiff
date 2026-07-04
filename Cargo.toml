@@ -8,6 +8,7 @@ edition = "2024"
 description = "Semantic diff for CSV and Parquet tables: key-matched, type-aware, larger-than-RAM"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/zhangkaiyuan007/tabdiff"
 keywords = ["diff", "csv", "parquet", "data", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 

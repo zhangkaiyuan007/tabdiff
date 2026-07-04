@@ -1,5 +1,7 @@
 # tabdiff
 
+[![CI](https://github.com/zhangkaiyuan007/tabdiff/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangkaiyuan007/tabdiff/actions/workflows/ci.yml)
+
 Semantic diff for CSV and Parquet tables. Single binary, type-aware, CI-friendly.
 
 ![tabdiff demo](assets/demo.gif)
