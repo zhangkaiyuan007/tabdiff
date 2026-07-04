@@ -163,7 +163,10 @@ fn keyless_multiset_diff() {
 fn keyless_fallback_when_no_unique_key() {
     let report = run_diff(&cfg("events_left.csv", "events_right.csv")).unwrap();
     assert!(report.keyless, "should fall back to keyless automatically");
-    assert!(report.key.inferred, "fallback should be marked as automatic");
+    assert!(
+        report.key.inferred,
+        "fallback should be marked as automatic"
+    );
     assert_eq!(report.diff.added, 2);
     assert_eq!(report.diff.removed, 2);
 }
@@ -320,7 +323,10 @@ fn keyless_rename_guard_low_cardinality() {
     let report = run_diff(&c).unwrap();
     std::fs::remove_file(&lp).ok();
     std::fs::remove_file(&rp).ok();
-    assert!(report.schema.renamed.is_empty(), "boolean columns must not pair");
+    assert!(
+        report.schema.renamed.is_empty(),
+        "boolean columns must not pair"
+    );
     assert_eq!(report.schema.added.len(), 1);
     assert_eq!(report.schema.removed.len(), 1);
 }

@@ -68,10 +68,14 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
             bail!("--keyless and --key are mutually exclusive");
         }
         if has_tol {
-            bail!("float tolerances are not supported in keyless mode (rows are matched by exact content hash)");
+            bail!(
+                "float tolerances are not supported in keyless mode (rows are matched by exact content hash)"
+            );
         }
         if cfg.assume_sorted {
-            bail!("--assume-sorted requires a key (keyless mode orders rows by content hash, not file order)");
+            bail!(
+                "--assume-sorted requires a key (keyless mode orders rows by content hash, not file order)"
+            );
         }
         Mode::Keyless { auto: false }
     } else if let Some(k) = &cfg.key {
@@ -110,12 +114,8 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
     };
 
     match &mode {
-        Mode::Keyed(k, _) => {
-            rename::detect_renames(cfg, &lschema, &rschema, &mut schema, Some(k))?
-        }
-        Mode::Keyless { .. } => {
-            rename::detect_renames(cfg, &lschema, &rschema, &mut schema, None)?
-        }
+        Mode::Keyed(k, _) => rename::detect_renames(cfg, &lschema, &rschema, &mut schema, Some(k))?,
+        Mode::Keyless { .. } => rename::detect_renames(cfg, &lschema, &rschema, &mut schema, None)?,
     }
     // Renamed columns ride along under their side-local names.
     let mut lproj = schema.mutual.clone();

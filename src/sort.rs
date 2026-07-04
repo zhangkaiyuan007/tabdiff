@@ -426,7 +426,13 @@ impl SortedSource {
             .iter()
             .map(|r| RunCursor::new(r.open()?, codec.clone()))
             .collect::<Result<Vec<_>>>()?;
-        Self::start(KWayMerge::new(cursors), codec, label, false, Some(total_rows))
+        Self::start(
+            KWayMerge::new(cursors),
+            codec,
+            label,
+            false,
+            Some(total_rows),
+        )
     }
 
     /// Streams directly from the reader without sorting or spilling; key
@@ -546,9 +552,6 @@ mod tests {
     #[test]
     fn unify_falls_back_to_utf8() {
         assert_eq!(unify(&DataType::Int64, &DataType::Utf8), DataType::Utf8);
-        assert_eq!(
-            unify(&DataType::Date32, &DataType::Utf8),
-            DataType::Utf8
-        );
+        assert_eq!(unify(&DataType::Date32, &DataType::Utf8), DataType::Utf8);
     }
 }

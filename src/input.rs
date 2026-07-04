@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::Seek;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -61,9 +60,8 @@ pub fn open_batches(
 
     let batches = match format_of(path, fmt)? {
         FileFormat::Csv => {
-            let mut file = File::open(path)?;
+            let file = File::open(path)?;
             let format = Format::default().with_header(true);
-            file.rewind()?;
             let reader = ReaderBuilder::new(full.clone())
                 .with_format(format)
                 .with_batch_size(BATCH_ROWS)

@@ -80,10 +80,7 @@ fn keyed_candidates(
             let ra = column(&rsample, add)?;
             let mut eq = 0usize;
             for &(li, ri) in &matched {
-                if cmp.eq(
-                    &extract(la.as_ref(), li)?,
-                    &extract(ra.as_ref(), ri)?,
-                ) {
+                if cmp.eq(&extract(la.as_ref(), li)?, &extract(ra.as_ref(), ri)?) {
                     eq += 1;
                 }
             }

@@ -49,8 +49,16 @@ pub fn diff_streams(
     let lkey = key_render_columns(&key_cols, &lcodec);
     let rkey = key_render_columns(&key_cols, &rcodec);
 
-    let mut counts = DiffCounts { added: 0, removed: 0, modified: 0 };
-    let mut samples = Samples { added: vec![], removed: vec![], modified: vec![] };
+    let mut counts = DiffCounts {
+        added: 0,
+        removed: 0,
+        modified: 0,
+    };
+    let mut samples = Samples {
+        added: vec![],
+        removed: vec![],
+        modified: vec![],
+    };
     let mut columns_changed: BTreeMap<String, usize> = BTreeMap::new();
     let mut truncated = false;
 
@@ -126,7 +134,10 @@ pub fn diff_streams(
 
     Ok(DiffReport {
         schema,
-        key: KeyInfo { columns: key_cols, inferred },
+        key: KeyInfo {
+            columns: key_cols,
+            inferred,
+        },
         keyless: false,
         rows: RowCounts {
             left: ls.total_rows(),
@@ -171,8 +182,16 @@ pub fn diff_streams_keyless(
     let lcols = sample_columns(&lorder, &lschema)?;
     let rcols = sample_columns(&rorder, &rschema)?;
 
-    let mut counts = DiffCounts { added: 0, removed: 0, modified: 0 };
-    let mut samples = Samples { added: vec![], removed: vec![], modified: vec![] };
+    let mut counts = DiffCounts {
+        added: 0,
+        removed: 0,
+        modified: 0,
+    };
+    let mut samples = Samples {
+        added: vec![],
+        removed: vec![],
+        modified: vec![],
+    };
     let mut truncated = false;
 
     loop {
@@ -227,7 +246,10 @@ pub fn diff_streams_keyless(
 
     Ok(DiffReport {
         schema,
-        key: KeyInfo { columns: vec![], inferred: auto },
+        key: KeyInfo {
+            columns: vec![],
+            inferred: auto,
+        },
         keyless: true,
         rows: RowCounts {
             left: ls.total_rows(),
@@ -330,7 +352,9 @@ pub fn infer_key(left: &Table, right: &Table, mutual: &[String]) -> Result<Vec<S
             return Ok(cols);
         }
     }
-    bail!("could not infer a key column that is unique and non-null on both sides; pass --key <column[,column]>")
+    bail!(
+        "could not infer a key column that is unique and non-null on both sides; pass --key <column[,column]>"
+    )
 }
 
 fn key_is_unique(t: &Table, cols: &[String]) -> Result<bool> {

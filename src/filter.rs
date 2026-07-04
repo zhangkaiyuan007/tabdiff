@@ -142,10 +142,8 @@ impl Clause {
 fn ord_compatible(a: &Cell, b: &Cell) -> bool {
     matches!(
         (a, b),
-        (
-            Cell::Int(_) | Cell::Float(_),
-            Cell::Int(_) | Cell::Float(_)
-        ) | (Cell::Str(_), Cell::Str(_))
+        (Cell::Int(_) | Cell::Float(_), Cell::Int(_) | Cell::Float(_))
+            | (Cell::Str(_), Cell::Str(_))
     )
 }
 

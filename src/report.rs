@@ -72,8 +72,7 @@ pub struct DiffReport {
 
 impl DiffReport {
     pub fn has_differences(&self) -> bool {
-        !self.schema.is_empty()
-            || self.diff.added + self.diff.removed + self.diff.modified > 0
+        !self.schema.is_empty() || self.diff.added + self.diff.removed + self.diff.modified > 0
     }
 
     pub fn to_json(&self) -> String {
@@ -127,7 +126,10 @@ impl DiffReport {
             ));
         }
 
-        o.push_str(&format!("{b}Rows{z}: {} → {}\n", self.rows.left, self.rows.right));
+        o.push_str(&format!(
+            "{b}Rows{z}: {} → {}\n",
+            self.rows.left, self.rows.right
+        ));
         let total = self.diff.added + self.diff.removed + self.diff.modified;
         if total == 0 {
             o.push_str("  no row differences\n");
@@ -160,10 +162,18 @@ impl DiffReport {
                 o.push_str(&format!("{y}~ {}{z}  {}\n", fmt_key(&m.key), ch));
             }
             for s in &self.samples.added {
-                o.push_str(&format!("{g}+ {}{}{z}\n", fmt_key(&s.row), fmt_count(s.count)));
+                o.push_str(&format!(
+                    "{g}+ {}{}{z}\n",
+                    fmt_key(&s.row),
+                    fmt_count(s.count)
+                ));
             }
             for s in &self.samples.removed {
-                o.push_str(&format!("{r}- {}{}{z}\n", fmt_key(&s.row), fmt_count(s.count)));
+                o.push_str(&format!(
+                    "{r}- {}{}{z}\n",
+                    fmt_key(&s.row),
+                    fmt_count(s.count)
+                ));
             }
             let shown = self.samples.modified.len()
                 + self.samples.added.iter().map(|s| s.count).sum::<usize>()

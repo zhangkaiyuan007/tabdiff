@@ -14,6 +14,15 @@ included, automatically.
 > size. Informal benchmark, two 2M-row / 54 MB CSVs at an 8 MB sort budget: keyed diff
 > ~1.0 s / 29 MB peak RSS, `--assume-sorted` ~0.7 s, keyless ~4.4 s.
 
+## Install
+
+Prebuilt binaries and a PyPI package are planned. For now, build from source
+(needs a recent stable Rust):
+
+```console
+$ cargo install --path .
+```
+
 ## Usage
 
 ```console
@@ -127,4 +136,5 @@ cargo run -- testdata/left.csv testdata/right.csv
 
 ## License
 
-MIT OR Apache-2.0
+Licensed under either of the [Apache License 2.0](LICENSE-APACHE) or the
+[MIT License](LICENSE-MIT), at your option.

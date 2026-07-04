@@ -74,7 +74,8 @@ fn diff(
     let dict: Py<PyDict> = PyModule::import(py, "json")?
         .call_method1("loads", (report.to_json(),))?
         .extract()?;
-    dict.bind(py).set_item("has_differences", report.has_differences())?;
+    dict.bind(py)
+        .set_item("has_differences", report.has_differences())?;
     Ok(dict)
 }
 

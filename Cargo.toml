@@ -5,6 +5,11 @@ members = ["python"]
 name = "tabdiff"
 version = "0.1.0"
 edition = "2024"
+description = "Semantic diff for CSV and Parquet tables: key-matched, type-aware, larger-than-RAM"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["diff", "csv", "parquet", "data", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 anyhow = "1.0.103"

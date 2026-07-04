@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 
 use anyhow::Result;
 use arrow::array::{
-    Array, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array,
-    Int64Array, LargeStringArray, StringArray, StringViewArray, UInt8Array, UInt16Array,
-    UInt32Array, UInt64Array,
+    Array, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+    LargeStringArray, StringArray, StringViewArray, UInt8Array, UInt16Array, UInt32Array,
+    UInt64Array,
 };
 use arrow::datatypes::DataType;
 use arrow::util::display::array_value_to_string;
