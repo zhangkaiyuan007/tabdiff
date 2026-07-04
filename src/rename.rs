@@ -59,8 +59,8 @@ fn keyed_candidates(
     lcols.extend(removed.iter().cloned());
     let mut rcols = key.to_vec();
     rcols.extend(added.iter().cloned());
-    let lsample = read_sample(&cfg.left, lschema, &lcols, SAMPLE_ROWS)?;
-    let rsample = read_sample(&cfg.right, rschema, &rcols, SAMPLE_ROWS)?;
+    let lsample = read_sample(&cfg.left, lschema, &lcols, SAMPLE_ROWS, cfg.input_format)?;
+    let rsample = read_sample(&cfg.right, rschema, &rcols, SAMPLE_ROWS, cfg.input_format)?;
 
     let lmap = key_map(&lsample, key)?;
     let rmap = key_map(&rsample, key)?;
@@ -103,8 +103,8 @@ fn jaccard_candidates(
     removed: &[String],
     added: &[String],
 ) -> Result<Vec<(String, String, f64)>> {
-    let lsample = read_sample(&cfg.left, lschema, removed, SAMPLE_ROWS)?;
-    let rsample = read_sample(&cfg.right, rschema, added, SAMPLE_ROWS)?;
+    let lsample = read_sample(&cfg.left, lschema, removed, SAMPLE_ROWS, cfg.input_format)?;
+    let rsample = read_sample(&cfg.right, rschema, added, SAMPLE_ROWS, cfg.input_format)?;
     let mut candidates = vec![];
     for rem in removed {
         let lset = value_set(&lsample, rem)?;

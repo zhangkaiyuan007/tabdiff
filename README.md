@@ -69,6 +69,24 @@ Common flags:
 
 Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences found, `2` error.
 
+## git integration
+
+Make `git diff` render semantic table diffs for CSV/Parquet files tracked in a repo:
+
+```console
+$ git config --global diff.tabdiff.command "tabdiff --git"
+$ echo '*.parquet diff=tabdiff' >> .gitattributes
+$ echo '*.csv diff=tabdiff' >> .gitattributes
+$ git diff data.csv
+tabdiff data.csv
+Schema
+  identical
+Key: id (inferred)
+...
+```
+
+All regular flags combine with `--git`, e.g. `tabdiff --key id --tol-rel 1e-9 --git`.
+
 ## Why not …
 
 - **`diff`/`git diff`** — text-based: row order, float formatting, and column order all produce noise.

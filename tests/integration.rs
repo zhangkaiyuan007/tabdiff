@@ -21,6 +21,7 @@ fn cfg(left: &str, right: &str) -> DiffConfig {
         keyless: false,
         assume_sorted: false,
         spill_dir: None,
+        input_format: None,
     }
 }
 
@@ -127,6 +128,7 @@ fn spilling_produces_same_results_as_in_memory() {
             keyless: false,
             assume_sorted: false,
             spill_dir: None,
+            input_format: None,
         };
         let report = run_diff(&c).unwrap();
         assert_eq!(report.diff.added, 5, "memory_mb={memory_mb}");
@@ -328,4 +330,53 @@ fn explicit_composite_key() {
     let report = run_diff(&c).unwrap();
     assert!(!report.key.inferred);
     assert_eq!(report.diff.modified, 2);
+}
+
+/// Simulates git invoking the diff driver: 7 args, temp files without
+/// extensions, format derived from the repo path; must always exit 0.
+#[test]
+fn git_driver_mode() {
+    let dir = std::env::temp_dir();
+    let old = dir.join(format!("tabdiff-git-old-{}", std::process::id()));
+    let new = dir.join(format!("tabdiff-git-new-{}", std::process::id()));
+    std::fs::copy(data("left.csv"), &old).unwrap();
+    std::fs::copy(data("right.csv"), &new).unwrap();
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tabdiff"))
+        .args([
+            "--git",
+            "data/table.csv",
+            old.to_str().unwrap(),
+            "abc123",
+            "100644",
+            new.to_str().unwrap(),
+            "def456",
+            "100644",
+        ])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&old).ok();
+    std::fs::remove_file(&new).ok();
+
+    assert!(out.status.success(), "git mode must exit 0 even with diffs");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("tabdiff data/table.csv"), "{stdout}");
+    assert!(stdout.contains("1 added"), "{stdout}");
+
+    // Added file: old side is /dev/null.
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tabdiff"))
+        .args([
+            "--git",
+            "data/table.csv",
+            "/dev/null",
+            "0000",
+            "0",
+            "unused",
+            "def456",
+            "100644",
+        ])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert!(String::from_utf8(out.stdout).unwrap().contains("new file"));
 }

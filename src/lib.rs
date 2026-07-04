@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 
+use input::FileFormat;
 use report::DiffReport;
 use value::Comparator;
 
@@ -37,12 +38,15 @@ pub struct DiffConfig {
     pub assume_sorted: bool,
     /// Where spill files go (defaults to the system temp dir).
     pub spill_dir: Option<PathBuf>,
+    /// Force the input format for both sides instead of using file
+    /// extensions (needed for extension-less temp files, e.g. from git).
+    pub input_format: Option<FileFormat>,
 }
 
 pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
-    let lschema = input::probe_schema(&cfg.left)
+    let lschema = input::probe_schema(&cfg.left, cfg.input_format)
         .with_context(|| format!("failed to read {}", cfg.left.display()))?;
-    let rschema = input::probe_schema(&cfg.right)
+    let rschema = input::probe_schema(&cfg.right, cfg.input_format)
         .with_context(|| format!("failed to read {}", cfg.right.display()))?;
     let mut schema = schema_diff::diff_schemas(&lschema, &rschema);
     if schema.mutual.is_empty() {
@@ -70,10 +74,20 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
         row_diff::validate_key(k, &schema)?;
         Mode::Keyed(k.clone(), false)
     } else {
-        let lsample =
-            input::read_sample(&cfg.left, &lschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
-        let rsample =
-            input::read_sample(&cfg.right, &rschema, &schema.mutual, KEY_INFER_SAMPLE_ROWS)?;
+        let lsample = input::read_sample(
+            &cfg.left,
+            &lschema,
+            &schema.mutual,
+            KEY_INFER_SAMPLE_ROWS,
+            cfg.input_format,
+        )?;
+        let rsample = input::read_sample(
+            &cfg.right,
+            &rschema,
+            &schema.mutual,
+            KEY_INFER_SAMPLE_ROWS,
+            cfg.input_format,
+        )?;
         if cfg.assume_sorted {
             bail!("--assume-sorted requires an explicit --key");
         }
@@ -107,8 +121,8 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
         rproj.push(r.right.clone());
     }
 
-    let left = input::open_batches(&cfg.left, &lschema, &lproj)?;
-    let right = input::open_batches(&cfg.right, &rschema, &rproj)?;
+    let left = input::open_batches(&cfg.left, &lschema, &lproj, cfg.input_format)?;
+    let right = input::open_batches(&cfg.right, &rschema, &rproj, cfg.input_format)?;
     match mode {
         Mode::Keyed(key_cols, inferred) => {
             let cmp = Comparator::new(cfg.tol_abs, cfg.tol_rel);
