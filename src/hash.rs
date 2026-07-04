@@ -165,7 +165,7 @@ impl PreppedCol {
 /// Serializes a cell for hashing with the same normalization the keyed
 /// comparator applies: integral floats hash like ints (so CSV `1` matches
 /// Parquet `1.0`), NaN is canonical, and -0.0 folds into 0.
-fn write_cell(buf: &mut Vec<u8>, c: &Cell) {
+pub(crate) fn write_cell(buf: &mut Vec<u8>, c: &Cell) {
     match c {
         Cell::Null => buf.push(0),
         Cell::Bool(b) => {

@@ -101,6 +101,14 @@ impl DiffReport {
         for c in &self.schema.type_changed {
             o.push_str(&format!("  {y}~ {}: {} → {}{z}\n", c.name, c.left, c.right));
         }
+        for c in &self.schema.renamed {
+            o.push_str(&format!(
+                "  {y}~ {} → {} (renamed, {:.0}% content match){z}\n",
+                c.left,
+                c.right,
+                c.similarity * 100.0
+            ));
+        }
 
         if self.keyless {
             o.push_str(&format!(

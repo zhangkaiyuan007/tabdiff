@@ -249,6 +249,78 @@ fn cross_type_keys_unify() {
     assert_eq!(report.schema.type_changed.len(), 1); // id: Int64 -> Float64
 }
 
+/// rename_left/right: `amount` renamed to `amt` with identical values except
+/// one edited row (id=7). Keyed detection must pair the columns and keep the
+/// column in the row diff under the display name `amount→amt`.
+#[test]
+fn keyed_rename_detection() {
+    let report = run_diff(&cfg("rename_left.csv", "rename_right.csv")).unwrap();
+    assert_eq!(report.schema.renamed.len(), 1);
+    assert_eq!(report.schema.renamed[0].left, "amount");
+    assert_eq!(report.schema.renamed[0].right, "amt");
+    assert!(report.schema.added.is_empty());
+    assert!(report.schema.removed.is_empty());
+    assert_eq!(report.diff.modified, 1); // the id=7 edit
+    assert_eq!(report.columns_changed.get("amount→amt"), Some(&1));
+}
+
+#[test]
+fn keyless_rename_detection_with_high_cardinality() {
+    let dir = std::env::temp_dir();
+    let lp = dir.join(format!("tabdiff-ren-l-{}.csv", std::process::id()));
+    let rp = dir.join(format!("tabdiff-ren-r-{}.csv", std::process::id()));
+    // `code` renamed to `token`, 30 distinct values, no unique key (dup rows).
+    let mut l = String::from("code,grp\n");
+    let mut r = String::from("token,grp\n");
+    for i in 0..30 {
+        for _ in 0..2 {
+            l.push_str(&format!("c{i},g\n"));
+            r.push_str(&format!("c{i},g\n"));
+        }
+    }
+    std::fs::write(&lp, &l).unwrap();
+    std::fs::write(&rp, &r).unwrap();
+    let mut c = cfg("left.csv", "right.csv");
+    c.left = lp.clone();
+    c.right = rp.clone();
+    c.keyless = true;
+    let report = run_diff(&c).unwrap();
+    std::fs::remove_file(&lp).ok();
+    std::fs::remove_file(&rp).ok();
+    assert_eq!(report.schema.renamed.len(), 1);
+    assert_eq!(report.schema.renamed[0].left, "code");
+    assert_eq!(report.schema.renamed[0].right, "token");
+    // Renamed column hashes at an aligned position: rows still match.
+    assert_eq!(report.diff.added, 0);
+    assert_eq!(report.diff.removed, 0);
+}
+
+/// Low-cardinality columns must never be claimed as renames in keyless mode.
+#[test]
+fn keyless_rename_guard_low_cardinality() {
+    let dir = std::env::temp_dir();
+    let lp = dir.join(format!("tabdiff-grd-l-{}.csv", std::process::id()));
+    let rp = dir.join(format!("tabdiff-grd-r-{}.csv", std::process::id()));
+    let mut l = String::from("flag,v\n");
+    let mut r = String::from("active,v\n");
+    for i in 0..40 {
+        l.push_str(&format!("{},x{}\n", i % 2 == 0, i));
+        r.push_str(&format!("{},x{}\n", i % 2 == 0, i));
+    }
+    std::fs::write(&lp, &l).unwrap();
+    std::fs::write(&rp, &r).unwrap();
+    let mut c = cfg("left.csv", "right.csv");
+    c.left = lp.clone();
+    c.right = rp.clone();
+    c.keyless = true;
+    let report = run_diff(&c).unwrap();
+    std::fs::remove_file(&lp).ok();
+    std::fs::remove_file(&rp).ok();
+    assert!(report.schema.renamed.is_empty(), "boolean columns must not pair");
+    assert_eq!(report.schema.added.len(), 1);
+    assert_eq!(report.schema.removed.len(), 1);
+}
+
 #[test]
 fn explicit_composite_key() {
     let mut c = cfg("left.csv", "right.csv");

@@ -4,7 +4,8 @@ Semantic diff for CSV and Parquet tables. Single binary, type-aware, CI-friendly
 
 Unlike text-based `diff`, tabdiff matches rows by key and compares **values**, not bytes:
 `1.0` equals `1.00`, floats can have tolerances, column order doesn't matter, and you
-can diff a CSV against a Parquet file directly. Tables without a unique key (logs,
+can diff a CSV against a Parquet file directly. Renamed columns are detected by content
+similarity and keep participating in the row diff. Tables without a unique key (logs,
 event streams, transaction exports) are compared as row multisets instead — duplicates
 included, automatically.
 
@@ -20,6 +21,7 @@ $ tabdiff old.csv new.parquet
 Schema
   + email (Utf8)
   - legacy (Utf8)
+  ~ amount → amt (renamed, 97% content match)
 Key: id (inferred)
 Rows: 5 → 5
   + 1 added
@@ -76,8 +78,8 @@ Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences f
 
 ## Roadmap
 
-See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: column rename
-detection, git diff driver for Parquet, `--where` row filtering, Python bindings.
+See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: git diff driver
+for Parquet, `--where` row filtering, Python bindings.
 Performance track: keyless-mode throughput (hash-sort currently shuffles whole rows).
 
 Cross-type keys unify automatically: an `Int64` id on one side matches a `Float64` id

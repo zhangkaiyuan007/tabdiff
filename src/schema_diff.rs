@@ -15,10 +15,19 @@ pub struct TypeChange {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RenamedColumn {
+    pub left: String,
+    pub right: String,
+    /// Content similarity that backed the claim (match rate or Jaccard).
+    pub similarity: f64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SchemaDiff {
     pub added: Vec<ColumnDesc>,
     pub removed: Vec<ColumnDesc>,
     pub type_changed: Vec<TypeChange>,
+    pub renamed: Vec<RenamedColumn>,
     /// Columns present on both sides, in left-schema order.
     #[serde(skip)]
     pub mutual: Vec<String>,
@@ -26,7 +35,10 @@ pub struct SchemaDiff {
 
 impl SchemaDiff {
     pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.removed.is_empty() && self.type_changed.is_empty()
+        self.added.is_empty()
+            && self.removed.is_empty()
+            && self.type_changed.is_empty()
+            && self.renamed.is_empty()
     }
 }
 
@@ -35,6 +47,7 @@ pub fn diff_schemas(left: &Schema, right: &Schema) -> SchemaDiff {
         added: vec![],
         removed: vec![],
         type_changed: vec![],
+        renamed: vec![],
         mutual: vec![],
     };
     for f in left.fields() {

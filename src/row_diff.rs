@@ -32,13 +32,20 @@ pub fn diff_streams(
     let mut spill = SpillDir::new(cfg.spill_dir.clone());
     let (mut ls, mut rs) = build_sources(left, right, &lcodec, &rcodec, cfg, &mut spill)?;
 
-    // (column name, index in left projected schema, index in right)
-    let value_cols: Vec<(String, usize, usize)> = schema
+    // (display name, index in left projected schema, index in right)
+    let mut value_cols: Vec<(String, usize, usize)> = schema
         .mutual
         .iter()
         .filter(|c| !key_cols.contains(c))
         .map(|c| Ok((c.clone(), lschema.index_of(c)?, rschema.index_of(c)?)))
         .collect::<Result<_>>()?;
+    for r in &schema.renamed {
+        value_cols.push((
+            format!("{}→{}", r.left, r.right),
+            lschema.index_of(&r.left)?,
+            rschema.index_of(&r.right)?,
+        ));
+    }
     let lkey = key_render_columns(&key_cols, &lcodec);
     let rkey = key_render_columns(&key_cols, &rcodec);
 
@@ -142,9 +149,15 @@ pub fn diff_streams_keyless(
     schema: SchemaDiff,
     cfg: &DiffConfig,
 ) -> Result<DiffReport> {
-    let mutual = schema.mutual.clone();
-    let left = with_row_hash(left, &mutual)?;
-    let right = with_row_hash(right, &mutual)?;
+    // Renamed columns hash at aligned positions so rows still match.
+    let mut lorder = schema.mutual.clone();
+    let mut rorder = schema.mutual.clone();
+    for r in &schema.renamed {
+        lorder.push(r.left.clone());
+        rorder.push(r.right.clone());
+    }
+    let left = with_row_hash(left, &lorder)?;
+    let right = with_row_hash(right, &rorder)?;
     let lschema = left.schema.clone();
     let rschema = right.schema.clone();
     let key_cols = vec![HASH_COL.to_string()];
@@ -155,8 +168,8 @@ pub fn diff_streams_keyless(
     let mut spill = SpillDir::new(cfg.spill_dir.clone());
     let (mut ls, mut rs) = build_sources(left, right, &lcodec, &rcodec, cfg, &mut spill)?;
 
-    let lcols = sample_columns(&mutual, &lschema)?;
-    let rcols = sample_columns(&mutual, &rschema)?;
+    let lcols = sample_columns(&lorder, &lschema)?;
+    let rcols = sample_columns(&rorder, &rschema)?;
 
     let mut counts = DiffCounts { added: 0, removed: 0, modified: 0 };
     let mut samples = Samples { added: vec![], removed: vec![], modified: vec![] };

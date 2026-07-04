@@ -1,5 +1,6 @@
 pub mod hash;
 pub mod input;
+pub mod rename;
 pub mod report;
 pub mod row_diff;
 pub mod schema_diff;
@@ -43,7 +44,7 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
         .with_context(|| format!("failed to read {}", cfg.left.display()))?;
     let rschema = input::probe_schema(&cfg.right)
         .with_context(|| format!("failed to read {}", cfg.right.display()))?;
-    let schema = schema_diff::diff_schemas(&lschema, &rschema);
+    let mut schema = schema_diff::diff_schemas(&lschema, &rschema);
     if schema.mutual.is_empty() {
         bail!("tables share no columns; nothing to compare");
     }
@@ -90,8 +91,24 @@ pub fn run_diff(cfg: &DiffConfig) -> Result<DiffReport> {
         }
     };
 
-    let left = input::open_batches(&cfg.left, &lschema, &schema.mutual)?;
-    let right = input::open_batches(&cfg.right, &rschema, &schema.mutual)?;
+    match &mode {
+        Mode::Keyed(k, _) => {
+            rename::detect_renames(cfg, &lschema, &rschema, &mut schema, Some(k))?
+        }
+        Mode::Keyless { .. } => {
+            rename::detect_renames(cfg, &lschema, &rschema, &mut schema, None)?
+        }
+    }
+    // Renamed columns ride along under their side-local names.
+    let mut lproj = schema.mutual.clone();
+    let mut rproj = schema.mutual.clone();
+    for r in &schema.renamed {
+        lproj.push(r.left.clone());
+        rproj.push(r.right.clone());
+    }
+
+    let left = input::open_batches(&cfg.left, &lschema, &lproj)?;
+    let right = input::open_batches(&cfg.right, &rschema, &rproj)?;
     match mode {
         Mode::Keyed(key_cols, inferred) => {
             let cmp = Comparator::new(cfg.tol_abs, cfg.tol_rel);
