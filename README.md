@@ -82,6 +82,9 @@ Common flags:
 
 Exit codes follow `diff`/`cmp` convention: `0` no differences, `1` differences found, `2` error.
 
+Keys with different types on each side unify automatically: an `Int64` id matches a
+`Float64` id, and UUID-as-binary meets UUID-as-text at Utf8.
+
 ## git integration
 
 Make `git diff` render semantic table diffs for CSV/Parquet files tracked in a repo:
@@ -109,12 +112,11 @@ All regular flags combine with `--git`, e.g. `tabdiff --key id --tol-rel 1e-9 --
 
 ## Roadmap
 
-See [docs/MVP-requirements.md](docs/MVP-requirements.md). Highlights: PyPI/binary
-releases, S3/stdin inputs, sampling mode for very large tables.
-Performance track: keyless-mode throughput (hash-sort currently shuffles whole rows).
-
-Cross-type keys unify automatically: an `Int64` id on one side matches a `Float64` id
-on the other, and e.g. UUID-as-binary meets UUID-as-text at Utf8.
+- Prebuilt binaries and a PyPI package
+- S3 and stdin inputs
+- Sampling mode: estimate the difference rate of huge tables quickly
+- Keyless-mode throughput (the hash sort currently shuffles whole rows)
+- Database sources through an embedded engine (DuckDB), keeping the single binary
 
 ## Python
 
